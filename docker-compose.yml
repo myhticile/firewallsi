@@ -1,0 +1,63 @@
+services: # serviços do docker
+  firewall: # cria o firewall
+    build: ./firewall # monta a imagem usando essa pasta
+    container_name: seginf-firewall # nome do container
+    cap_add: # adiciona permissões
+      - NET_ADMIN # permite mexer nas configurações de rede
+    sysctls: # configurações do sistema
+      net.ipv4.ip_forward: "1" # passa dados de uma rede para outra
+    networks: # redes que o firewall vai usar
+      cliente_net: # rede dos clientes
+        ipv4_address: 172.20.0.2 # ip do firewall nessa rede
+      dmz_net: # rede dos servidores
+        ipv4_address: 172.21.0.2 # ip do firewall nessa rede
+
+  cliente: # cria o computador de teste
+    image: alpine:3.20 # usa um linux leve
+    container_name: seginf-cliente # nome do container
+    cap_add: # adiciona permissões
+      - NET_ADMIN # permite configurar a rota
+    extra_hosts: # apelidos para os servidores de outra rede
+      - "dmz-web:172.21.0.10"
+      - "dmz-db:172.21.0.20"
+    command: ["sh", "-c", "apk add --no-cache curl nmap iproute2 netcat-openbsd iputils && ip route replace 172.21.0.0/24 via 172.20.0.2 && echo 'Cliente pronto.' && sleep infinity"] # instala ferramentas e manda o tráfego pelo firewall
+    depends_on: # define a ordem de inicialização
+      - firewall # inicia o firewall antes do cliente
+    networks: # conecta o cliente à rede
+      cliente_net: # rede dos clientes
+        ipv4_address: 172.20.0.10 # ip do cliente
+
+  web: # cria o servidor do site
+    image: nginx:alpine # usa o nginx para rodar o site
+    container_name: seginf-web # nome do container
+    networks: # conecta o servidor à rede
+      dmz_net: # rede dos servidores
+        ipv4_address: 172.21.0.10 # ip do servidor web
+
+  banco: # cria o banco de dados
+    image: postgres:16-alpine # usa o postgresql
+    container_name: seginf-banco # nome do container
+    environment: # configura o banco
+      POSTGRES_USER: loja # usuário do banco
+      POSTGRES_PASSWORD: senha_teste # senha de teste
+      POSTGRES_DB: loja # nome do banco
+    volumes: # guarda os dados do banco
+      - banco_dados:/var/lib/postgresql/data # os dados não somem se o container for recriado
+    networks: # conecta o banco à rede
+      dmz_net: # rede dos servidores
+        ipv4_address: 172.21.0.20 # ip do banco
+
+networks: # cria as redes do projeto
+  cliente_net: # rede dos clientes
+    driver: bridge # cria uma rede virtual
+    ipam: # configura os ips da rede
+      config: # define a faixa de ips
+        - subnet: 172.20.0.0/24 # ips disponíveis para os clientes
+  dmz_net: # rede dos servidores
+    driver: bridge # cria outra rede virtual
+    ipam: # configura os ips da rede
+      config: # define a faixa de ips
+        - subnet: 172.21.0.0/24 # ips disponíveis para os servidores
+
+volumes: # volumes do projeto
+  banco_dados: # volume com os dados do banco
